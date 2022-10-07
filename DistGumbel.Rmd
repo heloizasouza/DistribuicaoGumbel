@@ -1,0 +1,426 @@
+---
+title: "Trabalho de Estatística Computacional - Distribuição de Gumbel"
+author: "Heloiza de Oliveira Souza e Marcos Thiago Caetano Guarenghi"
+date: "05/09/2022"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = TRUE)
+library(evd)
+library(optimx)
+library(ucminf)
+library(minqa)
+```
+
+
+# A distribuição do Gumbel
+
+A distribuição de Gumbel, também conhecida como distribuição do valor extremo de tipo I, é comumente usada para modelarmos o maior ou o menor valor de uma amostra aleatória. Portanto, é uma distribuição útil para descrever eventos em que o resultado é determinado pelo comportamento da melhor, ou pior, observação na amostra.
+
+O modelo é utilizada em confiabilidade, em que o tempo de falha de um sistema em série é determinado pelo mínimo de n tempos de falha dos componentes. Em análise climática, na modelagem de níveis hídricos relativos à enchentes, precipitação máxima em um ano e outros fenômenos naturais. A distribuição de Gumbell pode ser utilizada em diversas aplicações envolvendo séries temporais.
+
+A família de distribuições do Valor Extremo também incluem a de tipo II, a distribuição de Frechet, e a de tipo III, a distribuição Weibull. Note que se uma variável X tiver distribuição Weibull, então log(x) terá distribuição Gumbel. Uma outra transformação possível é que a diferença entre duas variáveis Gumbel terá distribuição logística.
+
+Comportamento da função densidade de probabilidade da distribuição Gumbel:
+
+```{r, warning=FALSE}
+plot(function(x) dgumbel(x, 2, 1), -15, 10, ylab='f(x)', col="blue")
+plot(function(x) dgumbel(x, 0, 2), -15, 10, add=T, col=2)
+plot(function(x) dgumbel(x, -2, 4), -15, 10, add=T, col=3)
+legend(-15, 0.3, c("f(x, 2, 1)","f(x, 0, 2)","f(x, -2, 4)"), fill=c("blue", 2, 3))
+title('Distribuicão Gumbel')
+```
+
+
+A função de densidade de probabilidade é dada por:
+
+$$f(x) = {1 \over \beta} e^{{x- \mu \over \beta}- e^{x- \mu \over \beta}}, ~~~-\infty < x < \infty, ~~\beta > 0$$
+
+Sua função de distribuição acumulada é dada por:
+
+$$F(x) = 1 - e^{- e^{x-\mu \over \beta }}, ~~~-\infty < x < \infty, ~~\beta > 0$$
+
+E sendo $X \sim Gumbel(\mu,\beta)$ temos que:
+
+$$E(X) = \mu +\gamma\beta ~~~~~e~~~~~ Var(X) = {\pi^2\beta^2 \over 6},$$
+em $\gamma$ é a constante de Euler–Mascheroni($\gamma \approx 0.5772$).
+
+# Geração de Amostras
+
+Utilizando o método da transformação inversa, construímos uma função para gerarmos valores aleatórios desse modelo.
+
+$$F(x) = 1 - e^{- e^{x-\mu \over \beta }}$$ 
+$$\Leftrightarrow  u = 1 - e^{- e^{F^{-1}(u)-\mu \over \beta }}$$ 
+$$\Leftrightarrow  - e^{F^{-1}(u)-\mu \over \beta } = ln(1 - u)$$
+$$\Leftrightarrow   {F^{-1}(u)-\mu \over \beta } = ln(-ln(1 - u))$$
+$$\Leftrightarrow  F^{-1}(u) = \mu + \beta ln(-ln(1 - u))$$
+
+```{r, warning=FALSE}
+set.seed(2022)
+
+tabela <- data.frame(N_amostra = NA, Vies = NA, EQM = NA, Variancia=NA, niv_Conf=NA, erro_I=NA,
+                     Vies_beta=NA, EQM_beta=NA, Variancia_beta=NA, niv_Conf_beta=NA)
+tabela[1:5,1] <- c(30,50,100,200,500)
+
+
+r_gumbell <- function(n,mu,beta) {
+  u=runif(n)
+  x=mu + beta*log( -log(1-u) )
+}
+
+n <- 10000
+mu <- 2
+beta <- 0.5
+x = r_gumbell(n=n, mu=mu, beta=beta)
+
+x_ord <- sort(x)
+
+hist(x, freq = F, ylim = c(0,1))
+dens <- (1/beta)*exp((x_ord-mu)/beta-exp((x_ord-mu)/beta))
+lines(x_ord, dens, col="red")
+
+```
+
+# Estimação dos Parâmetros
+
+Para uma amostra de tamanho $n$ da distribuição Gumbell($\mu, \beta$), obtemos a função log-verossimilhança:
+
+$$L(\mu, \beta) = \prod_{i=1}^n f(x_i) = \prod_{i=1}^n {1 \over \beta} e^{{x_i- \mu \over \beta}- e^{x_i- \mu \over \beta}} = ({1 \over \beta})^nexp(\sum_{i=1}^n{x_i-\mu \over \beta} -  \sum_{i=1}^nexp{x_i-\mu \over \beta}),$$
+$$l(\mu, \beta)=log(L(\mu, \beta))= -nlog(\beta)+\sum_{i=1}^n{x_i-\mu \over \beta} - \sum_{i=1}^n exp({x_i-\mu \over \beta}),$$
+
+```{r, warning=FALSE}
+log_vero <- function(p0){
+  mu <- p0[1]
+  beta <- p0[2]
+  n <- length(x)
+  aux <- -n*log(beta) + sum((x-mu)/beta) - sum(exp((x-mu)/beta))
+  return(-aux)
+}
+
+log_vero(c(1,1))
+
+par <- c(2,0.5)
+emv <- optimr(par,log_vero, method = "bobyqa", hessian = T)
+
+emv$par[1]
+emv$par[2]
+
+```
+
+# Estudo de Simulações dos Parâmetros
+```{r, warning=FALSE}
+n1=c(30,50,100,200,500)
+resultado=array(NA, dim=c(5,100,2))
+
+for(i in 1:5){
+  for(j in 1:100){
+    x=r_gumbell(n=n1[i], mu=2, beta=1)
+    emv <- optimr(par = par,fn = log_vero, hessian = T, method = "bobyqa")
+    resultado[i,j,1]=emv$par[1]
+    resultado[i,j,2]=emv$par[2]
+  }
+}
+```
+
+
+## Viés, EQM e Variância dos Parâmetros
+ i-ii-iii) $\mu$ 
+ 
+```{r, warning=FALSE}
+
+for (i in 1:5) {
+  tabela[i,2]=mean(resultado[i,,1])-mu # vies
+  tabela[i,4]=var(resultado[i,,1]) # variancia
+  tabela[i,3]=sum((resultado[i,,1]-mean(resultado[i,,1]))^2)/n # eqm
+}
+
+```
+
+
+ i-ii-iii) $\beta$ 
+
+```{r,warning=FALSE}
+
+for (i in 1:5) {
+  tabela[i,7]=mean(resultado[i,,2])-mu # vies
+  tabela[i,9]=var(resultado[i,,2]) # variancia
+  tabela[i,8]=sum((resultado[i,,2]-mean(resultado[i,,2]))^2)/n # eqm
+}
+
+```
+
+
+iv) a proporção de vezes que o intervalo de confiança assintótico cobre o verdadeiro valor dos parâmetros;
+
+```{r,warning=FALSE}
+n <- 30
+m <- 1000
+muIC <- matrix(NA, nrow=2, ncol=m)
+betaIC <- matrix(NA, nrow=2, ncol=m)
+mu <- 2
+beta <- 0.5
+cont_mu <- 0
+cont_beta <- 0
+
+for (i in 1:m) {
+  x <- matrix(r_gumbell(n = n*m, mu = mu, beta = beta), nrow = m, ncol = n)
+  # para maxmizar a funcao
+  emv <- optimr(par = par, fn = log_vero, hessian = T, method = "bobyqa")
+  # para gerar os intervalos de confianca dos parametros
+  muIC[,i] <- emv$par[1]+1.96*c(-1,1)*sqrt(solve(emv$hessian)[1,1])
+  betaIC[,i] <- emv$par[2]+1.96*c(-1,1)*sqrt(solve(emv$hessian)[2,2])
+  # para fazer a contagem dos intervalos que contém o valor do parâmetro
+  if(muIC[1,i]<2 && 2<muIC[2,i]) cont_mu = cont_mu +1
+  if(betaIC[1,i]<0.5 && 0.5<betaIC[2,i]) cont_beta = cont_beta +1    
+}
+
+tabela[1,5] <- cont_mu/m
+tabela[1,10] <- cont_beta/m
+
+
+# tamanho amostral n=50
+n <- 50
+m <- 1000
+muIC <- matrix(NA, nrow=2, ncol=m)
+betaIC <- matrix(NA, nrow=2, ncol=m)
+mu <- 2
+beta <- 0.5
+cont_mu <- 0
+cont_beta <- 0
+
+for (i in 1:m) {
+  x <- matrix(r_gumbell(n = n*m, mu = mu, beta = beta), nrow = m, ncol = n)
+  # para maxmizar a funcao
+  emv <- optimr(par = par, fn = log_vero, hessian = T, method = "bobyqa")
+  # para gerar os intervalos de confianca dos parametros
+  muIC[,i] <- emv$par[1]+1.96*c(-1,1)*sqrt(solve(emv$hessian)[1,1])
+  betaIC[,i] <- emv$par[2]+1.96*c(-1,1)*sqrt(solve(emv$hessian)[2,2])
+  # para fazer a contagem dos intervalos que contém o valor do parâmetro
+  if(muIC[1,i]<2 && 2<muIC[2,i]) cont_mu = cont_mu +1
+  if(betaIC[1,i]<0.5 && 0.5<betaIC[2,i]) cont_beta = cont_beta +1    
+}
+
+tabela[2,5] <- cont_mu/m
+tabela[2,10] <- cont_beta/m
+
+# tamanho amostral n=100
+n <- 100
+m <- 1000
+muIC <- matrix(NA, nrow=2, ncol=m)
+betaIC <- matrix(NA, nrow=2, ncol=m)
+mu <- 2
+beta <- 0.5
+cont_mu <- 0
+cont_beta <- 0
+
+for (i in 1:m) {
+  x <- matrix(r_gumbell(n = n*m, mu = mu, beta = beta), nrow = m, ncol = n)
+  # para maxmizar a funcao
+  emv <- optimr(par = par, fn = log_vero, hessian = T, method = "bobyqa")
+  # para gerar os intervalos de confianca dos parametros
+  muIC[,i] <- emv$par[1]+1.96*c(-1,1)*sqrt(solve(emv$hessian)[1,1])
+  betaIC[,i] <- emv$par[2]+1.96*c(-1,1)*sqrt(solve(emv$hessian)[2,2])
+  # para fazer a contagem dos intervalos que contém o valor do parâmetro
+  if(muIC[1,i]<2 && 2<muIC[2,i]) cont_mu = cont_mu +1
+  if(betaIC[1,i]<0.5 && 0.5<betaIC[2,i]) cont_beta = cont_beta +1    
+}
+
+tabela[3,5] <- cont_mu/m
+tabela[3,10] <- cont_beta/m
+
+# tamanho amostral n=200
+n <- 200
+m <- 1000
+muIC <- matrix(NA, nrow=2, ncol=m)
+betaIC <- matrix(NA, nrow=2, ncol=m)
+mu <- 2
+beta <- 0.5
+cont_mu <- 0
+cont_beta <- 0
+
+for (i in 1:m) {
+  x <- matrix(r_gumbell(n = n*m, mu = mu, beta = beta), nrow = m, ncol = n)
+  # para maxmizar a funcao
+  emv <- optimr(par = par, fn = log_vero, hessian = T, method = "bobyqa")
+  # para gerar os intervalos de confianca dos parametros
+  muIC[,i] <- emv$par[1]+1.96*c(-1,1)*sqrt(solve(emv$hessian)[1,1])
+  betaIC[,i] <- emv$par[2]+1.96*c(-1,1)*sqrt(solve(emv$hessian)[2,2])
+  # para fazer a contagem dos intervalos que contém o valor do parâmetro
+  if(muIC[1,i]<2 && 2<muIC[2,i]) cont_mu = cont_mu +1
+  if(betaIC[1,i]<0.5 && 0.5<betaIC[2,i]) cont_beta = cont_beta +1    
+}
+
+tabela[4,5] <- cont_mu/m
+tabela[4,10] <- cont_beta/m
+
+# tamanho amostral n=500
+n <- 500
+m <- 1000
+muIC <- matrix(NA, nrow=2, ncol=m)
+betaIC <- matrix(NA, nrow=2, ncol=m)
+mu <- 2
+beta <- 0.5
+cont_mu <- 0
+cont_beta <- 0
+
+for (i in 1:m) {
+  x <- matrix(r_gumbell(n = n*m, mu = mu, beta = beta), nrow = m, ncol = n)
+  # para maxmizar a funcao
+  emv <- optimr(par = par, fn = log_vero, hessian = T, method = "bobyqa")
+  # para gerar os intervalos de confianca dos parametros
+  muIC[,i] <- emv$par[1]+1.96*c(-1,1)*sqrt(solve(emv$hessian)[1,1])
+  betaIC[,i] <- emv$par[2]+1.96*c(-1,1)*sqrt(solve(emv$hessian)[2,2])
+  # para fazer a contagem dos intervalos que contém o valor do parâmetro
+  if(muIC[1,i]<2 && 2<muIC[2,i]) cont_mu = cont_mu +1
+  if(betaIC[1,i]<0.5 && 0.5<betaIC[2,i]) cont_beta = cont_beta +1    
+}
+
+tabela[5,5] <- cont_mu/m
+tabela[5,10] <- cont_beta/m
+```
+
+
+v) a proporção do erro tipo I de um teste de hipótese.
+
+```{r, warning=FALSE}
+# estimação do erro tipo I para mu=2
+
+log_vero_H0 <- function(p0, x){
+    mu <- 2
+    beta <- p0[1]
+    n <- length(x)
+    aux <- -n*log(beta) + sum((x-mu)/beta) - sum(exp((x-mu)/beta))
+    return(-aux)
+  }
+  
+log_vero_H1 <- function(p0, x){
+    mu <- p0[1]
+    beta <- p0[2]
+    n <- length(x)
+    aux <- -n*log(beta) + sum((x-mu)/beta) - sum(exp((x-mu)/beta))
+    return(-aux)
+  }  
+  
+# tamanho de amostra n=30
+set.seed(2022)
+n <- 30
+mu <- 2
+beta <- 0.5
+chute <- c(1,1)
+rept <- 1000
+teste <- numeric()
+for(i in 1:rept){
+  amostra <- r_gumbell(n, mu=mu, beta=beta)
+  
+  l0 = optimr(par = chute,fn = log_vero_H0, x=amostra, method = "ucminf")
+  l1 = optimr(par = chute,fn = log_vero_H1, x=amostra,method = "ucminf")
+  estat <- -2*(-l0$value - (-l1$value))
+  teste[i]=ifelse(estat > 2.705543, 1, 0)
+}
+tabela[1,6] <- sum(teste)/rept
+
+# tamanho de amostra n=50
+set.seed(2022)
+n <- 50
+mu <- 2
+beta <- 0.5
+chute <- c(1,1)
+rept <- 1000
+teste <- numeric()
+for(i in 1:rept){
+  amostra <- r_gumbell(n, mu=mu, beta=beta)
+  
+  l0 = optimr(par = chute,fn = log_vero_H0, x=amostra, method = "ucminf")
+  l1 = optimr(par = chute,fn = log_vero_H1, x=amostra,method = "ucminf")
+  estat <- -2*(-l0$value - (-l1$value))
+  teste[i]=ifelse(estat > 2.705543, 1, 0)
+}
+tabela[2,6] <- sum(teste)/rept
+
+# tamanho de amostra n=100
+set.seed(2022)
+n <- 100
+mu <- 2
+beta <- 0.5
+chute <- c(1,1)
+rept <- 1000
+teste <- numeric()
+for(i in 1:rept){
+  amostra <- r_gumbell(n, mu=mu, beta=beta)
+  
+  l0 = optimr(par = chute,fn = log_vero_H0, x=amostra, method = "ucminf")
+  l1 = optimr(par = chute,fn = log_vero_H1, x=amostra,method = "ucminf")
+  estat <- -2*(-l0$value - (-l1$value))
+  teste[i]=ifelse(estat > 2.705543, 1, 0)
+}
+tabela[3,6] <- sum(teste)/rept
+
+# tamanho de amostra n=200
+set.seed(2022)
+n <- 200
+mu <- 2
+beta <- 0.5
+chute <- c(1,1)
+rept <- 1000
+teste <- numeric()
+for(i in 1:rept){
+  amostra <- r_gumbell(n, mu=mu, beta=beta)
+  
+  l0 = optimr(par = chute,fn = log_vero_H0, x=amostra, method = "ucminf")
+  l1 = optimr(par = chute,fn = log_vero_H1, x=amostra,method = "ucminf")
+  estat <- -2*(-l0$value - (-l1$value))
+  teste[i]=ifelse(estat > 2.705543, 1, 0)
+}
+tabela[4,6] <- sum(teste)/rept
+
+# tamanho de amostra n=500
+set.seed(2022)
+n <- 500
+mu <- 2
+beta <- 0.5
+chute <- c(1,1)
+rept <- 1000
+teste <- numeric()
+for(i in 1:rept){
+  amostra <- r_gumbell(n, mu=mu, beta=beta)
+  
+  l0 = optimr(par = chute,fn = log_vero_H0, x=amostra, method = "ucminf")
+  l1 = optimr(par = chute,fn = log_vero_H1, x=amostra,method = "ucminf")
+  estat <- -2*(-l0$value - (-l1$value))
+  teste[i]=ifelse(estat > 2.705543, 1, 0)
+}
+tabela[5,6] <- sum(teste)/rept
+
+```
+
+
+Projeção gráfica dos resultados obtidos
+
+```{r, warning=FALSE}
+tabela
+par(c(2,1))
+plot(x = tabela$N_amostra, y = tabela$Vies, col = "blue", type = "l")
+plot(x = tabela$N_amostra, y = tabela$Vies_beta, col = "blue", type = "l")
+
+
+# Gráfico EQM
+plot(x = tabela$N_amostra, y = tabela$EQM, col = 2, type = "l",
+     xlab = "Amostra", ylab = "Erro Quadrático Médio")
+lines(x = tabela$N_amostra, y = tabela$EQM_beta, col = 4)
+legend("topright", legend=c("EQM mu", "EQM beta"), col=c(2,4), bty="n", lty = 1)
+title('Distribuicão Gumbel')
+
+# Gráfico da VariÂncia
+plot(x = tabela$N_amostra, y = tabela$Variancia, col = 6, type = "l",
+     xlab = "Amostra", ylab = "Variância")
+lines(x = tabela$N_amostra, y = tabela$Variancia_beta, col = 7)
+legend("topright", legend=c("Var mu", "Var beta"), col=c(6,7), bty="n", lty = 1)
+title('Distribuicão Gumbel')
+
+```
+
