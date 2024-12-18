@@ -34,6 +34,6 @@ O código gera gráficos que mostram o comportamento da função densidade de pr
 
 Os resultados obtidos com as simulações ajudam a entender o comportamento da distribuição de Gumbel em relação à estimativa dos parâmetros e à precisão das estimativas em função do tamanho da amostra.
 
+## Contribuição
 
-
-Este `README.md` descreve o que o código faz e as dependências necessárias, sem mencionar que é um trabalho de disciplina.
+Se você tiver sugestões, correções ou melhorias para os scripts, sinta-se à vontade para abrir uma issue ou enviar um pull request.
